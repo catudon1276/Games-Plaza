@@ -1,5 +1,6 @@
 const express = require('express');
 const { Client, middleware } = require('@line/bot-sdk');
+const GameManager = require('./utils/gameManager');
 require('dotenv').config();
 
 const app = express();
@@ -12,6 +13,7 @@ const config = {
 };
 
 const client = new Client(config);
+const gameManager = new GameManager();
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -39,33 +41,39 @@ async function handleEvent(event) {
     return null;
   }
 
-  const userMessage = event.message.text.toLowerCase();
+  const userMessage = event.message.text;
+  const userId = event.source.userId;
+  const groupId = event.source.groupId || event.source.roomId || userId; // 個人チャットの場合はuserIdを使用
+  
+  // ユーザー名を取得（可能な場合）
+  let userName = 'ユーザー';
+  try {
+    if (event.source.type === 'group' || event.source.type === 'room') {
+      const profile = await client.getGroupMemberProfile(groupId, userId);
+      userName = profile.displayName;
+    } else {
+      const profile = await client.getProfile(userId);
+      userName = profile.displayName;
+    }
+  } catch (error) {
+    console.log('Could not get user profile:', error.message);
+  }
+
+  // @または#から始まるコマンドのみ処理
+  if (!userMessage.startsWith('@') && !userMessage.startsWith('#')) {
+    return null; // 何も返さない
+  }
+
   let replyMessage = '';
 
-  // Simple response logic - you can expand this
-  switch (userMessage) {
-    case 'hello':
-    case 'こんにちは':
-      replyMessage = 'こんにちは！Games Plazaへようこそ！🎮\n\n利用可能なコマンド:\n- "ゲーム" - おすすめゲームを表示\n- "ランキング" - 人気ゲームランキング\n- "ヘルプ" - ヘルプを表示';
-      break;
-    
-    case 'ゲーム':
-    case 'game':
-      replyMessage = '🎮 おすすめゲーム\n\n1. パズルゲーム\n2. アクションゲーム\n3. RPGゲーム\n4. シューティングゲーム\n\nどのゲームに興味がありますか？';
-      break;
-    
-    case 'ランキング':
-    case 'ranking':
-      replyMessage = '🏆 人気ゲームランキング\n\n1位: スーパーマリオ\n2位: ポケモン\n3位: ゼルダの伝説\n4位: ファイナルファンタジー\n5位: ドラゴンクエスト';
-      break;
-    
-    case 'ヘルプ':
-    case 'help':
-      replyMessage = '📖 ヘルプ\n\nGames Plaza BOTの使い方:\n\n• "ゲーム" - ゲーム一覧を表示\n• "ランキング" - 人気ランキングを表示\n• "こんにちは" - 挨拶\n\nその他ご質問があればお気軽にお声かけください！';
-      break;
-    
-    default:
-      replyMessage = 'すみません、理解できませんでした。😅\n\n"ヘルプ"と入力すると利用可能なコマンドが表示されます。';
+  // @コマンドの処理
+  if (userMessage.startsWith('@')) {
+    const result = gameManager.handleCommand(groupId, userId, userName, userMessage);
+    replyMessage = result.message;
+  }
+  // #コマンドの処理（将来の拡張用）
+  else if (userMessage.startsWith('#')) {
+    replyMessage = '不明なコマンドです。';
   }
 
   return client.replyMessage(event.replyToken, {

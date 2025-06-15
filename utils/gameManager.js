@@ -40,14 +40,13 @@ class GameManager {
     const GameClass = this.getGameClass(gameType);
     if (!GameClass) {
       return { success: false, message: 'サポートされていないゲームです。' };
-    }
-
-    const game = new GameClass(groupId);
+    }    const game = new GameClass(groupId);
     this.games.set(groupId, game);
     
+    // ゲーム作成者を最初のプレイヤーとして追加
     const result = game.addPlayer(userId, userName);
     if (result.success) {
-      result.message = `🎮 ${this.getGameName(gameType)}を開始しました！\n\n${result.message}`;
+      result.message = `${this.getGameName(gameType)}がインストールされました…\n参加したい人は@参加 [ニックネーム]と送ってください`;
     }
     
     return result;
@@ -96,7 +95,7 @@ class GameManager {
   // ゲーム名取得
   getGameName(gameType) {
     const gameNames = {
-      'werewolf': '人狼ゲーム'
+      'werewolf': '人狼'
     };
     
     return gameNames[gameType] || gameType;
