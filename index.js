@@ -98,16 +98,24 @@ async function handleEvent(event) {
   } catch (error) {
     console.log('Could not get user profile:', error.message);
   }
-
   // @または#から始まるコマンドのみ処理
   if (!userMessage.startsWith('@') && !userMessage.startsWith('#')) {
     return null; // 何も返さない
   }
+
   let replyMessage = '';
+  const isPrivateChat = event.source.type === 'user';
+  
   // @コマンドの処理
   if (userMessage.startsWith('@')) {
-    const result = gameManager.handleCommand(groupId, userId, userName, userMessage);
-    replyMessage = result.message;
+    if (isPrivateChat) {
+      // 個人チャットでは@コマンドは受け付けない
+      replyMessage = '@コマンドはグループチャットで送信してください。';
+    } else {
+      // グループチャットでの@コマンド処理
+      const result = gameManager.handleCommand(groupId, userId, userName, userMessage);
+      replyMessage = result.message;
+    }
   }
   // #コマンドの処理
   else if (userMessage.startsWith('#')) {
@@ -116,8 +124,15 @@ async function handleEvent(event) {
     const command = parts[0];
     const args = parts.slice(1);
     
-    const result = gameManager.handleHashCommand(groupId, userId, userName, command, args);
-    replyMessage = result.message;
+    if (isPrivateChat) {
+      // 個人チャットでの夜行動コマンド処理
+      const result = gameManager.handlePrivateNightCommand(userId, userName, command, args);
+      replyMessage = result.message;
+    } else {
+      // グループチャットでの#コマンド処理
+      const result = gameManager.handleHashCommand(groupId, userId, userName, command, args);
+      replyMessage = result.message;
+    }
   }
 
   return client.replyMessage(event.replyToken, {

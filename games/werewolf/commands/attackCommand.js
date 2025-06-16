@@ -89,31 +89,18 @@ class AttackCommand {
       targetId: targetPlayer.id,
       targetName: targetPlayer.nickname
     });
-    
-    if (result.success) {
+      if (result.success) {
       this.game.updateActivity();
       
-      let message = `${targetPlayer.nickname}への襲撃を準備しました。`;
-      
-      // 全ての夜行動が完了したかチェック
-      const actionSummary = this.nightActionManager.getActionSummary();
-      if (actionSummary.allComplete) {
-        message += '\n\n全ての夜行動が完了しました。深夜フェーズに移行します...';
-        
-        // 自動で深夜フェーズに移行
-        setTimeout(() => {
-          this.autoSwitchToNightResolving();
-        }, 2000); // 2秒後に自動移行
-      }
-      
+      // submitActionの結果をそのまま返す（重複メッセージを避ける）
       return {
         success: true,
-        message: message,
+        message: result.message, // nightActionManagerのメッセージを使用
         target: {
           id: targetPlayer.id,
           name: targetPlayer.nickname
         },
-        allComplete: actionSummary.allComplete
+        publicMessage: result.publicMessage // 公開メッセージがあれば含める
       };
     } else {
       return result;

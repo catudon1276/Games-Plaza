@@ -45,57 +45,57 @@ class NightActionManager {
       requests: requests,
       timeLimit: this.nightTimeLimit / 1000 // 秒単位
     };
-  }
-  // プレイヤー別の行動選択肢作成（メタデータベース対応）
+  }  // プレイヤー別の行動選択肢作成（統一クイックリプライ対応）
   createActionRequestForPlayer(player) {
     const roleInfo = getRoleInfo(player.role);
     if (!roleInfo) {
       return {
         message: '❓ 役職情報が不明です',
-        actions: [{ type: 'skip', target: null, display: '何もしない' }]
+        actions: []
       };
     }
 
     const abilities = getRoleAbilities(player.role);
-    if (abilities.length === 0) {
-      // 能力を持たない役職（村人など）
+    
+    // 霊媒師の特殊処理：夜はfocus行動、深夜にmedium自動実行
+    if (player.role === 'medium') {
+      const gameState = {
+        players: this.game.players,
+        lastExecuted: this.game.lastExecuted,
+        dayCount: this.game.phaseManager.dayCount
+      };
+
+      // focus行動のクイックリプライを生成
+      const focusQuickReply = this.abilityManager.generateUnifiedQuickReply('focus', player, gameState);
+      
       return {
-        message: `😴 ${getRoleName(player.role)}は夜の間は休みます`,
-        actions: [{ type: 'skip', target: null, display: '休む' }]
+        message: `🔮 ${getRoleName(player.role)}として注目行動を選択してください。霊媒結果は深夜に自動で得られます。`,
+        actions: focusQuickReply?.options || []
       };
     }
 
-    // 能力を持つ役職の行動選択肢を生成
-    return this.generateAbilityActions(player, abilities);
-  }
-
-  // 能力別の行動選択肢生成
-  generateAbilityActions(player, abilities) {
-    const alivePlayers = this.game.players.filter(p => p.isAlive && p.id !== player.id);
-    let message = '';
-    let actions = [];
-
-    for (const abilityId of abilities) {
-      const abilityActions = this.abilityManager.generateAbilityQuickReply(abilityId, player, {
-        alivePlayers: alivePlayers,
-        game: this.game
-      });
-
-      if (abilityActions) {
-        if (message) message += '\n';
-        message += abilityActions.message;
-        actions.push(...abilityActions.actions);
-      }
+    if (abilities.length === 0) {
+      // 能力を持たない役職
+      return {
+        message: `😴 ${getRoleName(player.role)}は夜の間は休みます`,
+        actions: []
+      };
     }
 
-    // 何もしない選択肢を追加
-    actions.push({ type: 'skip', target: null, display: '何もしない' });
+    // 統一クイックリプライで行動選択肢を生成
+    const gameState = {
+      players: this.game.players,
+      lastExecuted: this.game.lastExecuted,
+      dayCount: this.game.phaseManager.dayCount
+    };
 
+    const quickReply = this.abilityManager.generateNightActionMenu(player, gameState);
+    
     return {
-      message: message || `${getRoleName(player.role)}として行動を選択してください`,
-      actions: actions
-    };  }
-
+      message: `🌙 ${getRoleName(player.role)}として夜行動を選択してください`,
+      actions: quickReply?.options || []
+    };
+  }
   // プレイヤーの行動を登録
   submitAction(userId, actionType, targetId = null) {
     const player = this.game.getPlayer(userId);
@@ -119,29 +119,26 @@ class NightActionManager {
       type: actionType,
       target: targetId,
       timestamp: new Date()
-    });
-
-    const targetName = targetId ? this.game.getPlayer(targetId)?.userName : 'なし';
+    });    const targetName = targetId ? this.game.getPlayer(targetId)?.userName : 'なし';
     
     // 全員の行動が揃ったかチェック
     if (this.areAllActionsSubmitted()) {
       this.clearAutoActionTimer();
-      // 深夜フェーズに移行
+      // 深夜フェーズに移行（公開メッセージ付き）
       setTimeout(() => this.resolveNightActions(), 1000);
       
       return {
         success: true,
-        message: `行動を受付けました（対象: ${targetName}）\n全員の行動が揃いました。深夜フェーズに移行します...`,
-        allReady: true
+        message: `行動を受付けました。`,
+        allReady: true,
+        publicMessage: '🌙 夜が更けました…' // 公開メッセージとして送信
       };
     }
 
-    const remaining = this.getRemainingPlayersCount();
     return {
       success: true,
-      message: `行動を受付けました（対象: ${targetName}）\n残り${remaining}人の行動待ちです。`,
-      allReady: false,
-      remaining: remaining
+      message: `行動を受付けました。`,
+      allReady: false
     };
   }
   // 行動の妥当性チェック（メタデータベース対応）
@@ -185,17 +182,15 @@ class NightActionManager {
     }
     
     return actions;
-  }
-
-  // 全員が行動を提出したかチェック
+  }  // 全員が行動を提出したかチェック
   areAllActionsSubmitted() {
-    const alivePlayers = this.game.players.filter(p => p.isAlive);
+    const alivePlayers = this.game.players.filter(p => p.isAlive); // 霊媒師も含める
     return this.pendingActions.size >= alivePlayers.length;
   }
 
   // 残りプレイヤー数取得
   getRemainingPlayersCount() {
-    const alivePlayers = this.game.players.filter(p => p.isAlive);
+    const alivePlayers = this.game.players.filter(p => p.isAlive); // 霊媒師も含める
     return alivePlayers.length - this.pendingActions.size;
   }
 
@@ -212,11 +207,9 @@ class NightActionManager {
       clearTimeout(this.autoActionTimer);
       this.autoActionTimer = null;
     }
-  }
-
-  // 自動行動実行（5分経過時）
+  }  // 自動行動実行（5分経過時）
   executeAutoActions() {
-    const alivePlayers = this.game.players.filter(p => p.isAlive);
+    const alivePlayers = this.game.players.filter(p => p.isAlive); // 霊媒師も含める
     
     for (const player of alivePlayers) {
       if (!this.pendingActions.has(player.userId)) {
@@ -265,8 +258,7 @@ class NightActionManager {
     }
 
     return { type: 'skip', target: null };
-  }
-  // 深夜フェーズ：行動処理（メタデータベース対応）
+  }  // 深夜フェーズ：行動処理（メタデータベース対応）
   resolveNightActions() {
     console.log('Resolving night actions...');
     
@@ -275,6 +267,37 @@ class NightActionManager {
       privateMessages: [],
       publicMessage: ''
     };
+
+    // 霊媒師の自動実行（昨日の処刑者を霊視）
+    const mediumPlayers = this.game.players.filter(p => p.isAlive && p.role === 'medium');
+    for (const mediumPlayer of mediumPlayers) {
+      const mediumResult = this.abilityManager.executeAbility(
+        'medium',
+        mediumPlayer,
+        null, // ターゲットは不要（処刑者全員を自動で対象）
+        { 
+          game: this.game, 
+          executedPlayers: this.game.lastExecuted || [] // 昨日の処刑者リスト
+        }
+      );
+
+      if (mediumResult.success && mediumResult.result) {
+        results.executions.push({
+          ability: 'medium',
+          actor: mediumPlayer,
+          target: null,
+          result: mediumResult.result
+        });
+
+        // 霊媒結果は個別メッセージで送信
+        if (mediumResult.privateMessage) {
+          results.privateMessages.push({
+            userId: mediumPlayer.userId,
+            message: mediumResult.privateMessage
+          });
+        }
+      }
+    }
 
     // 全ての行動を能力別に実行
     for (const [userId, action] of this.pendingActions.entries()) {
@@ -327,10 +350,19 @@ class NightActionManager {
     let hasDeaths = false;
 
     for (const execution of executions) {
-      if (execution.ability === 'attack' && execution.result.died) {
-        const attackAbility = this.abilityManager.getAbility('attack');
-        message += attackAbility.buildPublicMessage(execution.result) + '\n';
-        hasDeaths = true;
+      if (execution.ability === 'attack') {
+        // 襲撃結果をチェック
+        if (execution.result === 'killed') {
+          message += `${execution.target.nickname}が人狼に襲撃されました。\n`;
+          hasDeaths = true;
+          
+          // プレイヤーを死亡状態にする
+          if (execution.target) {
+            execution.target.isAlive = false;
+          }
+        } else if (execution.result === 'guarded') {
+          // 護衛成功は公開メッセージには含めない（平和な夜として扱う）
+        }
       }
     }
 
@@ -338,7 +370,8 @@ class NightActionManager {
       message += '今夜は平和でした。誰も襲われませんでした。\n';
     }
 
-    return message;  }
+    return message;
+  }
 
   // アクション要約取得（メタデータベース対応）
   getActionSummary() {

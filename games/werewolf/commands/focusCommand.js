@@ -83,17 +83,16 @@ class FocusCommand {
 
     // 注目アクション実行
     const focusAbility = this.abilityManager.getAbility('focus');
-    const result = focusAbility.execute(player, targetPlayer, { game: this.game });
-
-    if (result.success) {
+    const result = focusAbility.execute(player, targetPlayer, { game: this.game });    if (result.success) {
       // 夜行動として登録
-      this.game.nightActionManager.submitAction(userId, 'focus', targetPlayer.id);
+      const submitResult = this.game.nightActionManager.submitAction(userId, 'focus', targetPlayer.id);
       
       this.game.updateActivity();
       return {
         success: true,
-        message: result.privateMessage,
-        target: targetPlayer.nickname
+        message: submitResult.message, // nightActionManagerのメッセージを使用
+        target: targetPlayer.nickname,
+        publicMessage: submitResult.publicMessage // 公開メッセージがあれば含める
       };
     } else {
       return result;

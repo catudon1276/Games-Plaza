@@ -27,12 +27,17 @@ class AbilityManager {
     const abilityIds = getRoleAbilities(roleId);
     return abilityIds.map(id => this.abilities[id]).filter(Boolean);
   }
-
   // 能力実行
   executeAbility(abilityId, actor, target, gameState) {
     const ability = this.getAbility(abilityId);
     if (!ability) {
       return { success: false, message: '不明な能力です。' };
+    }
+
+    // 霊媒師の特殊処理：targetの代わりにexecutedPlayersを使用
+    if (abilityId === 'medium') {
+      const executedPlayers = gameState?.executedPlayers || [];
+      return ability.execute(actor, executedPlayers, gameState);
     }
 
     return ability.execute(actor, target, gameState);
@@ -58,6 +63,91 @@ class AbilityManager {
     return ability.generateQuickReply(actor, gameState);
   }
 
+  // 統一クイックリプライ生成（新機能）
+  generateUnifiedQuickReply(abilityId, actor, gameState) {
+    const { getAbilityMeta, getAbilityTargetRules, getRoleTeam } = require('../meta');
+    
+    const abilityMeta = getAbilityMeta(abilityId);
+    if (!abilityMeta) {
+      return null;
+    }
+
+    const targetRules = abilityMeta.targetRules;
+      // 特殊処理：霊媒は自動実行（クイックリプライ不要）
+    if (abilityId === 'medium') {
+      return {
+        type: 'text',
+        message: '霊媒師として処刑された人の役職を自動的に調べます。他のプレイヤーの行動を待っています。'
+      };
+    }
+
+    // 特殊処理：注目は特別な選択肢
+    if (abilityId === 'focus') {
+      return this.generateFocusQuickReply(actor, gameState);
+    }
+
+    // 通常の対象選択
+    let targetPlayers = gameState.players.filter(player => {
+      // 死亡者除外
+      if (targetRules.excludeDead && !player.isAlive) {
+        return false;
+      }
+
+      // 自分除外
+      if (targetRules.excludeSelf && player.id === actor.id) {
+        return false;
+      }
+
+      // チームメイト除外（人狼同士など）
+      if (targetRules.excludeTeammates && getRoleTeam(player.role) === getRoleTeam(actor.role)) {
+        return false;
+      }
+
+      // 特定陣営のみ対象
+      if (targetRules.allowedTargets && targetRules.allowedTargets.length > 0) {
+        const playerTeam = getRoleTeam(player.role);
+        if (!targetRules.allowedTargets.includes(playerTeam)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    return {
+      type: 'quick_reply',
+      title: `${abilityMeta.name}対象を選んでください`,
+      options: targetPlayers.map(player => ({
+        label: player.nickname,
+        text: `#${abilityMeta.command} @${player.nickname}`,
+        value: player.id
+      }))
+    };
+  }
+  // 注目専用クイックリプライ
+  generateFocusQuickReply(actor, gameState) {
+    const alivePlayers = gameState.players.filter(p => 
+      p.isAlive && p.id !== actor.id
+    );
+
+    const suspectOptions = alivePlayers.map(player => ({
+      label: `${player.nickname}を疑う`,
+      text: `#疑う @${player.nickname}`,
+      value: `suspect_${player.id}`
+    }));
+
+    const admireOptions = alivePlayers.map(player => ({
+      label: `${player.nickname}に憧憬`,
+      text: `#憧憬 @${player.nickname}`,
+      value: `admire_${player.id}`
+    }));
+
+    return {
+      type: 'quick_reply',
+      title: '注目行動を選んでください',
+      options: [...suspectOptions, ...admireOptions]
+    };
+  }
   // 役職の夜行動メニュー生成
   generateNightActionMenu(actor, gameState) {
     const abilities = this.getRoleAbilities(actor.role);
@@ -70,8 +160,8 @@ class AbilityManager {
     }
 
     if (abilities.length === 1) {
-      // 単一能力の場合、直接クイックリプライを生成
-      return this.generateAbilityQuickReply(abilities[0].id, actor, gameState);
+      // 単一能力の場合、統一クイックリプライを生成
+      return this.generateUnifiedQuickReply(abilities[0].id, actor, gameState);
     }
 
     // 複数能力の場合、選択メニューを生成
@@ -84,6 +174,11 @@ class AbilityManager {
         abilityId: ability.id
       }))
     };
+  }
+
+  // 統一クイックリプライ生成の公開メソッド
+  getUnifiedQuickReply(abilityId, actor, gameState) {
+    return this.generateUnifiedQuickReply(abilityId, actor, gameState);
   }
 
   // 全能力の夜間処理順序
