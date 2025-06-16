@@ -5,8 +5,14 @@ class BaseGame {  constructor(groupId) {
     this.status = 'waiting'; // waiting, playing, ended
     this.gameType = 'base';
     this.createdAt = new Date();
+    this.lastActivity = new Date();
     this.minPlayers = 3;
     this.maxPlayers = 20;
+    this.autoEndTimer = null;
+    this.autoEndTimeout = 30 * 60 * 1000; // 30分（ミリ秒）
+    
+    // 自動終了タイマーを開始
+    this.startAutoEndTimer();
   }
 
   // プレイヤーを追加
@@ -63,10 +69,63 @@ class BaseGame {  constructor(groupId) {
   getPlayerList() {
     return this.players.map((p, index) => `${index + 1}. ${p.userName}`).join('\n');
   }
-
   // プレイヤー取得
   getPlayer(userId) {
     return this.players.find(p => p.userId === userId);
+  }
+
+  // アクティビティ更新（コマンド受信時に呼び出し）
+  updateActivity() {
+    this.lastActivity = new Date();
+    this.resetAutoEndTimer();
+  }
+
+  // 自動終了タイマー開始
+  startAutoEndTimer() {
+    if (this.autoEndTimer) {
+      clearTimeout(this.autoEndTimer);
+    }
+    
+    this.autoEndTimer = setTimeout(() => {
+      this.autoEnd();
+    }, this.autoEndTimeout);
+  }
+
+  // 自動終了タイマーリセット
+  resetAutoEndTimer() {
+    if (this.status === 'ended') return;
+    
+    if (this.autoEndTimer) {
+      clearTimeout(this.autoEndTimer);
+    }
+    
+    this.startAutoEndTimer();
+  }
+
+  // 自動終了実行
+  autoEnd() {
+    if (this.status === 'ended') return;
+    
+    this.status = 'ended';
+    console.log(`Game ${this.groupId} auto-ended due to inactivity`);
+    
+    // GameManagerに通知が必要な場合のためのフラグ
+    this.autoEnded = true;
+  }
+
+  // タイマークリア（ゲーム終了時）
+  clearAutoEndTimer() {
+    if (this.autoEndTimer) {
+      clearTimeout(this.autoEndTimer);
+      this.autoEndTimer = null;
+    }
+  }
+
+  // ゲーム終了時にタイマーもクリア
+  endGame() {
+    this.status = 'ended';
+    this.clearAutoEndTimer();
+    return { success: true, message: 'ゲームが終了しました。' };
   }
 }
 

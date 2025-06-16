@@ -3,9 +3,11 @@ class GameManager {
   constructor() {
     this.games = new Map(); // groupId -> game instance
   }
-
   // コマンド処理（@から始まるコマンド）
   handleCommand(groupId, userId, userName, command) {
+    // 自動終了したゲームをチェック・削除
+    this.cleanupAutoEndedGames();
+    
     // @人狼 - 人狼ゲーム開始
     if (command === '@人狼') {
       return this.startGame(groupId, 'werewolf', userId, userName);
@@ -20,12 +22,55 @@ class GameManager {
     if (command.startsWith('@参加')) {
       const parts = command.split(' ');
       const nickname = parts.length > 1 ? parts.slice(1).join(' ') : userName;
-      return this.joinGame(groupId, userId, nickname);
+      const result = this.joinGame(groupId, userId, nickname);
+      
+      // アクティビティ更新
+      const game = this.games.get(groupId);
+      if (game) {
+        game.updateActivity();
+      }
+      
+      return result;
     }
     
     // @キャンセル - ゲーム参加キャンセル
     if (command === '@キャンセル') {
-      return this.leaveGame(groupId, userId);
+      const result = this.leaveGame(groupId, userId);
+      
+      // アクティビティ更新
+      const game = this.games.get(groupId);
+      if (game) {
+        game.updateActivity();
+      }
+      
+      return result;
+    }
+
+    return { success: false, message: '不明なコマンドです。' };
+  }
+
+  // #コマンド処理
+  handleHashCommand(groupId, userId, userName, command) {
+    // #開始 - ゲーム開始
+    if (command === '#開始') {
+      const game = this.games.get(groupId);
+      if (!game) {
+        return { success: false, message: 'このグループではゲームが開始されていません。' };
+      }
+
+      // 人狼ゲーム専用の処理
+      if (game.gameType === 'werewolf') {
+        const result = game.handleStartCommand(userId, userName);
+        
+        // アクティビティ更新
+        if (result.success) {
+          game.updateActivity();
+        }
+        
+        return result;
+      }
+
+      return { success: false, message: 'このゲームでは#開始コマンドは使用できません。' };
     }
 
     return { success: false, message: '不明なコマンドです。' };
@@ -82,11 +127,10 @@ class GameManager {
     }
     return { success: false, message: 'このグループではゲームが開始されていません。' };
   }
-
   // ゲームクラス取得
   getGameClass(gameType) {
     const gameClasses = {
-      'werewolf': require('../games/werewolf')
+      'werewolf': require('../games/werewolf/index')
     };
 
     return gameClasses[gameType];
@@ -100,7 +144,6 @@ class GameManager {
     
     return gameNames[gameType] || gameType;
   }
-
   // ゲーム状態確認
   getGameStatus(groupId) {
     const game = this.games.get(groupId);
@@ -109,6 +152,24 @@ class GameManager {
     }
 
     return { success: true, data: game.getStatus() };
+  }
+
+  // 自動終了したゲームをクリーンアップ
+  cleanupAutoEndedGames() {
+    for (const [groupId, game] of this.games.entries()) {
+      if (game.autoEnded || game.status === 'ended') {
+        console.log(`Cleaning up auto-ended game: ${groupId}`);
+        game.clearAutoEndTimer();
+        this.games.delete(groupId);
+      }
+    }
+  }
+
+  // 定期的なクリーンアップを開始（オプション）
+  startPeriodicCleanup() {
+    setInterval(() => {
+      this.cleanupAutoEndedGames();
+    }, 5 * 60 * 1000); // 5分ごと
   }
 }
 

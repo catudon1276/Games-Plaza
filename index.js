@@ -8,35 +8,75 @@ const PORT = process.env.PORT || 3000;
 
 // LINE BOT configuration
 const config = {
-  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.CHANNEL_SECRET,
+  channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN || 'dummy_token',
+  channelSecret: process.env.CHANNEL_SECRET || 'dummy_secret',
 };
 
-const client = new Client(config);
+// LINE Clientの初期化（環境変数チェック付き）
+let client = null;
+let lineEnabled = false;
+
+try {
+  if (process.env.CHANNEL_ACCESS_TOKEN && process.env.CHANNEL_SECRET) {
+    client = new Client({
+      channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
+      channelSecret: process.env.CHANNEL_SECRET,
+    });
+    lineEnabled = true;
+    console.log('LINE BOT enabled');
+  } else {
+    console.log('LINE BOT disabled - environment variables not set');
+    console.log('Server will run without LINE integration');
+  }
+} catch (error) {
+  console.error('LINE client initialization failed:', error.message);
+  console.log('Server will run without LINE integration');
+}
+
 const gameManager = new GameManager();
+
+// 定期的なゲームクリーンアップを開始
+gameManager.startPeriodicCleanup();
 
 // Health check endpoint
 app.get('/', (req, res) => {
   res.json({
     status: 'ok',
     message: 'Games Plaza LINEBOT is running!',
+    lineEnabled: lineEnabled,
     timestamp: new Date().toISOString()
   });
 });
 
 // Webhook endpoint for LINE
-app.post('/webhook', middleware(config), (req, res) => {
-  Promise
-    .all(req.body.events.map(handleEvent))
-    .then((result) => res.json(result))
-    .catch((err) => {
-      console.error('Error handling events:', err);
-      res.status(500).end();
-    });
+app.post('/webhook', (req, res) => {
+  if (!lineEnabled) {
+    return res.status(503).json({ error: 'LINE integration not configured' });
+  }
+
+  // LINE署名検証のミドルウェアを手動で適用
+  const lineMiddleware = middleware({
+    channelSecret: process.env.CHANNEL_SECRET
+  });
+
+  lineMiddleware(req, res, () => {
+    Promise
+      .all(req.body.events.map(handleEvent))
+      .then((result) => res.json(result))
+      .catch((err) => {
+        console.error('Error handling events:', err);
+        res.status(500).end();
+      });
+  });
 });
 
 // Event handler
 async function handleEvent(event) {
+  if (!lineEnabled || !client) {
+    console.log('LINE integration disabled, skipping event');
+    return null;
+  }
+
   if (event.type !== 'message' || event.message.type !== 'text') {
     return null;
   }
@@ -65,15 +105,15 @@ async function handleEvent(event) {
   }
 
   let replyMessage = '';
-
   // @コマンドの処理
   if (userMessage.startsWith('@')) {
     const result = gameManager.handleCommand(groupId, userId, userName, userMessage);
     replyMessage = result.message;
   }
-  // #コマンドの処理（将来の拡張用）
+  // #コマンドの処理
   else if (userMessage.startsWith('#')) {
-    replyMessage = '不明なコマンドです。';
+    const result = gameManager.handleHashCommand(groupId, userId, userName, userMessage);
+    replyMessage = result.message;
   }
 
   return client.replyMessage(event.replyToken, {
@@ -93,4 +133,9 @@ app.listen(PORT, () => {
   console.log(`Games Plaza LINEBOT is running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}`);
   console.log(`Webhook URL: http://localhost:${PORT}/webhook`);
+  console.log(`LINE integration: ${lineEnabled ? 'ENABLED' : 'DISABLED'}`);
+  
+  if (!lineEnabled) {
+    console.log('To enable LINE integration, set CHANNEL_ACCESS_TOKEN and CHANNEL_SECRET environment variables');
+  }
 });
