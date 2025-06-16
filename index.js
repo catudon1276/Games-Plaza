@@ -103,7 +103,6 @@ async function handleEvent(event) {
   if (!userMessage.startsWith('@') && !userMessage.startsWith('#')) {
     return null; // 何も返さない
   }
-
   let replyMessage = '';
   // @コマンドの処理
   if (userMessage.startsWith('@')) {
@@ -112,7 +111,12 @@ async function handleEvent(event) {
   }
   // #コマンドの処理
   else if (userMessage.startsWith('#')) {
-    const result = gameManager.handleHashCommand(groupId, userId, userName, userMessage);
+    // コマンドと引数を分離
+    const parts = userMessage.split(' ');
+    const command = parts[0];
+    const args = parts.slice(1);
+    
+    const result = gameManager.handleHashCommand(groupId, userId, userName, command, args);
     replyMessage = result.message;
   }
 

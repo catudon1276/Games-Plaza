@@ -46,18 +46,17 @@ class GameManager {
       return result;
     }
 
-    return { success: false, message: '不明なコマンドです。' };
-  }
+    return { success: false, message: '不明なコマンドです。' };  }
 
   // #コマンド処理
-  handleHashCommand(groupId, userId, userName, command) {
+  handleHashCommand(groupId, userId, userName, command, args = []) {
+    const game = this.games.get(groupId);
+    if (!game) {
+      return { success: false, message: 'このグループではゲームが開始されていません。' };
+    }
+
     // #開始 - ゲーム開始
     if (command === '#開始') {
-      const game = this.games.get(groupId);
-      if (!game) {
-        return { success: false, message: 'このグループではゲームが開始されていません。' };
-      }
-
       // 人狼ゲーム専用の処理
       if (game.gameType === 'werewolf') {
         const result = game.handleStartCommand(userId, userName);
@@ -66,11 +65,26 @@ class GameManager {
         if (result.success) {
           game.updateActivity();
         }
-        
-        return result;
+          return result;
       }
 
       return { success: false, message: 'このゲームでは#開始コマンドは使用できません。' };
+    }
+
+    // 人狼ゲーム専用のコマンド
+    if (game.gameType === 'werewolf') {
+      switch (command) {
+        case '#投票':
+          return game.handleVoteCommand(userId, args);
+        case '#投票確認':
+          return game.handleVoteCheckCommand(userId);        case '#襲撃':
+          return game.handleAttackCommand(userId, args);
+        case '#疑う':
+        case '#憧憬':
+          return game.handleFocusCommand(userId, args);
+        default:
+          return { success: false, message: '不明なコマンドです。' };
+      }
     }
 
     return { success: false, message: '不明なコマンドです。' };

@@ -29,15 +29,13 @@ class StartCommand {
         success: false, 
         message: 'ゲームに参加していない人は開始できません。' 
       };
-    }
-
-    // ゲーム開始処理
+    }    // ゲーム開始処理
     try {
       // 役職割り当て
       this.game.assignRoles();
       
-      // フェーズを昼に切り替え
-      const phaseResult = this.game.phaseManager.startGame();
+      // フェーズを夜に切り替え（初回は夜から開始）
+      const phaseResult = this.game.phaseManager.switchToPhase(this.game.phaseManager.phases.NIGHT_WAITING);
       
       // アクティビティ更新
       this.game.updateActivity();
@@ -45,7 +43,7 @@ class StartCommand {
       return {
         success: true,
         message: this.buildStartMessage(),
-        phase: phaseResult.phase,
+        phase: phaseResult.newPhase,
         dayCount: phaseResult.dayCount
       };
     } catch (error) {
@@ -56,7 +54,6 @@ class StartCommand {
       };
     }
   }
-
   // ゲーム開始メッセージ構築
   buildStartMessage() {
     const playerCount = this.game.players.length;
@@ -69,8 +66,8 @@ class StartCommand {
     message += `👨‍🌾 市民陣営: ${villagerCount}人\n\n`;
     message += `各プレイヤーには役職が割り当てられました。\n`;
     message += `役職確認は個人チャットで行ってください。\n\n`;
-    message += `🌅 1日目の朝になりました。\n`;
-    message += `議論を開始してください。`;
+    message += `� 1日目の夜になりました。\n`;
+    message += `人狼は襲撃対象を選んでください（#襲撃 @プレイヤー名）。`;
 
     return message;
   }

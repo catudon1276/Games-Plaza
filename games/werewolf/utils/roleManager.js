@@ -1,114 +1,86 @@
-// 人狼ゲームの役職管理
+// 新しい役職管理システム - メタデータベース
+const { 
+  calculateRoleComposition, 
+  getRoleInfo, 
+  getRoleName,
+  getRoleTeam,
+  checkWinCondition 
+} = require('../roles/meta');
+
 class RoleManager {
   constructor() {
+    // 互換性のための旧フォーマット
     this.roles = {
-      WEREWOLF: 'werewolf',      // 人狼
-      VILLAGER: 'villager',      // 市民
-      SEER: 'seer',              // 占い師
-      KNIGHT: 'knight',          // 騎士
-      MEDIUM: 'medium'           // 霊媒師
-    };
-
-    this.roleNames = {
-      [this.roles.WEREWOLF]: '人狼',
-      [this.roles.VILLAGER]: '市民',
-      [this.roles.SEER]: '占い師',
-      [this.roles.KNIGHT]: '騎士',
-      [this.roles.MEDIUM]: '霊媒師'
-    };
-
-    this.roleDescriptions = {
-      [this.roles.WEREWOLF]: '夜に市民を襲撃できます。仲間の人狼と協力して市民を全滅させましょう。',
-      [this.roles.VILLAGER]: '特殊能力はありませんが、議論で人狼を見つけ出しましょう。',
-      [this.roles.SEER]: '夜に一人を占い、人狼かどうか知ることができます。',
-      [this.roles.KNIGHT]: '夜に一人を守り、人狼の襲撃から守ることができます。',
-      [this.roles.MEDIUM]: '処刑された人の役職を知ることができます。'
+      WEREWOLF: 'werewolf',
+      VILLAGER: 'villager', 
+      SEER: 'seer',
+      KNIGHT: 'knight',
+      MEDIUM: 'medium'
     };
   }
 
-  // 人数に応じた役職構成を決定
-  getRoleComposition(playerCount) {
-    const werewolfCount = Math.floor(playerCount / 3); // 3分の1が人狼
-    const roles = [];
-
-    // 人狼を追加
-    for (let i = 0; i < werewolfCount; i++) {
-      roles.push(this.roles.WEREWOLF);
-    }
-
-    // 特殊役職を追加（人数に応じて）
-    if (playerCount >= 5) roles.push(this.roles.SEER);     // 占い師
-    if (playerCount >= 7) roles.push(this.roles.KNIGHT);   // 騎士
-    if (playerCount >= 9) roles.push(this.roles.MEDIUM);   // 霊媒師
-
-    // 残りは市民
-    while (roles.length < playerCount) {
-      roles.push(this.roles.VILLAGER);
-    }
-
-    return roles;
-  }
-
-  // 役職をプレイヤーに割り当て
+  // プレイヤーに役職を割り当て
   assignRolesToPlayers(players) {
     const playerCount = players.length;
-    const roles = this.getRoleComposition(playerCount);
+    const roleComposition = calculateRoleComposition(playerCount);
     
     // シャッフル
-    this.shuffleArray(roles);
+    const shuffledRoles = this.shuffleArray([...roleComposition]);
     
-    // プレイヤーに役職を割り当て
-    players.forEach((player, index) => {
-      player.role = roles[index];
-      player.isAlive = true;
-      player.actions = {}; // 夜の行動記録用
-    });
-
-    return {
-      werewolfCount: roles.filter(role => role === this.roles.WEREWOLF).length,
-      villagerCount: roles.filter(role => role !== this.roles.WEREWOLF).length,
-      composition: this.getRoleCompositionSummary(roles)
-    };
-  }
-
-  // 役職構成のサマリー取得
-  getRoleCompositionSummary(roles) {
-    const composition = {};
-    roles.forEach(role => {
-      composition[role] = (composition[role] || 0) + 1;
-    });
-    return composition;
-  }
-
-  // プレイヤーの役職情報取得
-  getPlayerRoleInfo(player) {
-    if (!player || !player.role) return null;
-
-    return {
-      role: player.role,
-      roleName: this.roleNames[player.role],
-      description: this.roleDescriptions[player.role]
-    };
-  }
-
-  // 陣営判定
-  getTeam(role) {
-    switch (role) {
-      case this.roles.WEREWOLF:
-        return 'werewolf';
-      default:
-        return 'villager';
+    // 役職割り当て
+    for (let i = 0; i < players.length; i++) {
+      players[i].role = shuffledRoles[i];
     }
+    
+    // 統計情報構築
+    const composition = this.buildCompositionStats(roleComposition);
+    
+    // 各プレイヤーに役職通知メッセージを設定
+    this.setRoleIntroMessages(players);
+    
+    return {
+      success: true,
+      composition: composition,
+      assignments: players.map(p => ({
+        playerId: p.id,
+        playerName: p.nickname,
+        role: p.role,
+        roleName: getRoleName(p.role),
+        team: getRoleTeam(p.role)
+      }))
+    };
   }
 
-  // 人狼チェック
-  isWerewolf(role) {
-    return role === this.roles.WEREWOLF;
+  // 役職構成統計
+  buildCompositionStats(roleComposition) {
+    const stats = {};
+    
+    for (const role of roleComposition) {
+      stats[role] = (stats[role] || 0) + 1;
+    }
+    
+    return {
+      total: roleComposition.length,
+      roles: stats,
+      summary: Object.entries(stats).map(([role, count]) => ({
+        role: role,
+        roleName: getRoleName(role),
+        count: count,
+        team: getRoleTeam(role)
+      }))
+    };
   }
 
-  // 能力者チェック
-  hasNightAbility(role) {
-    return [this.roles.WEREWOLF, this.roles.SEER, this.roles.KNIGHT].includes(role);
+  // 役職紹介メッセージ設定
+  setRoleIntroMessages(players) {
+    for (const player of players) {
+      const roleInfo = getRoleInfo(player.role);
+      if (roleInfo) {
+        player.roleIntro = roleInfo.intro;
+        player.roleDescription = roleInfo.description;
+        player.roleIntroMessage = `${roleInfo.intro}\n\n${roleInfo.description}`;
+      }
+    }
   }
 
   // 配列シャッフル
@@ -117,6 +89,88 @@ class RoleManager {
       const j = Math.floor(Math.random() * (i + 1));
       [array[i], array[j]] = [array[j], array[i]];
     }
+    return array;
+  }
+
+  // 役職表示名取得（互換性）
+  getRoleDisplayName(roleId) {
+    return getRoleName(roleId);
+  }
+
+  // チーム取得（互換性）
+  getRoleTeam(roleId) {
+    return getRoleTeam(roleId);
+  }
+
+  // 勝利条件チェック（互換性）
+  checkWinCondition(players) {
+    const alivePlayers = players.filter(p => p.isAlive);
+    return checkWinCondition(alivePlayers);
+  }
+
+  // 人数に応じた役職構成プレビュー
+  previewRoleComposition(playerCount) {
+    if (playerCount < 3) {
+      return { 
+        valid: false, 
+        message: '最低3人必要です。' 
+      };
+    }
+
+    const composition = calculateRoleComposition(playerCount);
+    const stats = this.buildCompositionStats(composition);
+    
+    return {
+      valid: true,
+      playerCount: playerCount,
+      composition: stats,
+      message: this.buildCompositionMessage(stats)
+    };
+  }
+
+  // 構成メッセージ構築
+  buildCompositionMessage(stats) {
+    let message = `👥 ${stats.total}人での役職構成:\n\n`;
+    
+    const villageTeam = stats.summary.filter(s => s.team === 'village');
+    const werewolfTeam = stats.summary.filter(s => s.team === 'werewolf');
+    
+    if (werewolfTeam.length > 0) {
+      message += '🐺 人狼陣営:\n';
+      for (const role of werewolfTeam) {
+        message += `  ${role.roleName}: ${role.count}人\n`;
+      }
+      message += '\n';
+    }
+    
+    if (villageTeam.length > 0) {
+      message += '👨‍🌾 村人陣営:\n';
+      for (const role of villageTeam) {
+        message += `  ${role.roleName}: ${role.count}人\n`;
+      }
+    }
+    
+    return message;
+  }
+
+  // 特定役職のプレイヤー取得
+  getPlayersByRole(players, roleId) {
+    return players.filter(p => p.role === roleId);
+  }
+
+  // 生存している特定役職のプレイヤー取得
+  getAlivePlayersByRole(players, roleId) {
+    return players.filter(p => p.role === roleId && p.isAlive);
+  }
+
+  // チーム別プレイヤー取得
+  getPlayersByTeam(players, team) {
+    return players.filter(p => getRoleTeam(p.role) === team);
+  }
+
+  // 生存チーム別プレイヤー取得
+  getAlivePlayersByTeam(players, team) {
+    return players.filter(p => getRoleTeam(p.role) === team && p.isAlive);
   }
 }
 
