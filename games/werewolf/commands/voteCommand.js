@@ -4,14 +4,13 @@ class VoteCommand {
     this.game = werewolfGame;
     this.voteManager = this.game.voteManager;
   }
-
   // #投票コマンド処理
   execute(userId, args) {
-    // 昼フェーズチェック
-    if (!this.game.phaseManager.isDay()) {
+    // 投票フェーズチェック
+    if (!this.game.phaseManager.isVote()) {
       return { 
         success: false, 
-        message: '昼フェーズでのみ投票できます。' 
+        message: '投票フェーズでのみ投票できます。' 
       };
     }
 
@@ -58,10 +57,8 @@ class VoteCommand {
         success: false, 
         message: `プレイヤー「${targetName}」が見つからないか、既に死亡しています。` 
       };
-    }
-
-    // 自己投票チェック
-    if (targetPlayer.id === userId) {
+    }    // 自己投票チェック
+    if (targetPlayer.userId === userId) {
       return { 
         success: false, 
         message: '自分自身には投票できません。' 
@@ -69,7 +66,7 @@ class VoteCommand {
     }
 
     // 投票実行
-    const result = this.voteManager.vote(userId, targetPlayer.id);
+    const result = this.voteManager.vote(userId, targetPlayer.userId);
     
     if (result.success) {
       this.game.updateActivity();

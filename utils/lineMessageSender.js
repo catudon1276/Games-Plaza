@@ -5,8 +5,7 @@ class LineMessageSender {
     constructor(client) {
         this.client = client;
     }
-    
-    /**
+      /**
      * コマンド結果に応じてメッセージを送信
      * @param {object} event - LINEイベント
      * @param {object} result - コマンド結果
@@ -14,6 +13,7 @@ class LineMessageSender {
     async sendCommandResult(event, result) {
         const { replyToken } = event;
         const groupId = event.source.groupId || event.source.roomId;
+        const userId = event.source.userId;
         
         if (!result.success) {
             // エラーメッセージは即座にreplyで返す
@@ -24,11 +24,11 @@ class LineMessageSender {
         }
         
         // 成功時の処理
-        if (result.isPrivate) {
+        if (result.isPrivate || event.source.type === 'user') {
             // 個人メッセージの場合
             if (event.source.type === 'group' || event.source.type === 'room') {
                 // グループ内では個人にpushMessage
-                return this.client.pushMessage(event.source.userId, {
+                return this.client.pushMessage(userId, {
                     type: 'text',
                     text: result.message
                 });

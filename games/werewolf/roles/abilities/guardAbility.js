@@ -31,13 +31,15 @@ class GuardAbility {
     const validation = this.validateTarget(actor, target, gameState);
     if (!validation.valid) {
       return { success: false, message: validation.message };
-    }
-
-    return {
+    }    return {
       success: true,
+      result: {
+        targetId: target.id,
+        targetName: target.nickname,
+        actionType: 'guard'
+      },
       target: target,
       message: `${target.nickname}を護衛しました。`,
-      privateMessage: `🛡️ ${target.nickname}を護衛します。人狼の襲撃から守ります。`,
       effects: {
         guard: [target.id]
       }
@@ -66,6 +68,31 @@ class GuardAbility {
           value: player.id
         }))
     };
+  }  // 深夜処理後の個人ログ生成（護衛対象確認のみ）
+  generateNightLog(actor, guardResult, attackResults = []) {
+    if (!guardResult) return null;
+
+    // guardResultが直接結果オブジェクトの場合
+    if (guardResult.targetName) {
+      return `🛡️ ${guardResult.targetName}を護衛しました。`;
+    }
+    
+    // guardResultがtargetプロパティを持つ場合（従来形式）
+    if (guardResult.target && guardResult.target.nickname) {
+      return `🛡️ ${guardResult.target.nickname}を護衛しました。`;
+    }
+
+    return null;
+  }
+
+  // 護衛成功判定ヘルパー
+  wasGuardSuccessful(guardTarget, attackResults) {
+    return attackResults.some(attack => 
+      attack.ability === 'attack' && 
+      attack.target && 
+      attack.target.id === guardTarget.id &&
+      attack.result === 'guarded'
+    );
   }
 }
 

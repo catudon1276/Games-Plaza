@@ -33,9 +33,7 @@ class AttackAbility {
     const validation = this.validateTarget(actor, target, gameState);
     if (!validation.valid) {
       return { success: false, message: validation.message };
-    }
-
-    // 護衛チェック
+    }    // 護衛チェック
     const guardedPlayers = this.getGuardedPlayers(gameState);
     const isGuarded = guardedPlayers.includes(target.id);
 
@@ -60,10 +58,21 @@ class AttackAbility {
         kill: [target.id]
       }
     };
-  }
-
-  // 護衛されているプレイヤーを取得
+  }  // 護衛されているプレイヤーを取得
   getGuardedPlayers(gameState) {
+    // nightActionsがMapの場合の処理
+    if (gameState.nightActions instanceof Map) {
+      const guardedPlayers = [];
+      for (const [userId, action] of gameState.nightActions.entries()) {
+        // actionの構造: { type: 'guard', target: 'villager1', timestamp: ... }
+        if (action.type === 'guard' && action.target) {
+          guardedPlayers.push(action.target);
+        }
+      }
+      return guardedPlayers;
+    }
+    
+    // 従来形式の配列の場合の処理
     const guardActions = gameState.nightActions?.guard || [];
     return guardActions.map(action => action.targetId);
   }
@@ -83,6 +92,30 @@ class AttackAbility {
         value: player.id
       }))
     };
+  }
+
+  // 深夜処理後の個人ログ生成（襲撃結果詳細）
+  generateNightLog(actor, attackResult, attackType = 'single', additionalInfo = {}) {
+    if (!attackResult || !attackResult.target) return null;
+
+    const target = attackResult.target;
+    let message = '';
+
+    if (attackResult.result === 'killed') {
+      message = `🔪 襲撃成功！${target.nickname}を襲撃しました。`;
+      
+      if (attackType === 'random' && additionalInfo.allTargets) {
+        message += `\n（複数の襲撃対象から${target.nickname}がランダムで選ばれました）`;
+      } else if (attackType === 'unified' && additionalInfo.actorCount > 1) {
+        message += `\n（${additionalInfo.actorCount}人の人狼が同じ対象を襲撃しました）`;
+      }
+    } else if (attackResult.result === 'guarded') {
+      message = `🛡️ 襲撃失敗！${target.nickname}は護衛されていました。`;
+    } else {
+      message = `❓ 襲撃が何らかの理由で阻止されました。`;
+    }
+
+    return message;
   }
 }
 

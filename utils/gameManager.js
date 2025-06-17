@@ -3,6 +3,9 @@ class GameManager {
   constructor() {
     this.games = new Map(); // groupId -> game instance
     this.playerGroupMap = new Map(); // userId -> groupId (プレイヤーがどのグループでゲーム中か)
+    this.cleanupInterval = null; // 定期クリーンアップのタイマー
+    this.messageSender = null; // メッセージ送信機能
+    this.lineClient = null; // LINE Client
   }
   // コマンド処理（@から始まるコマンド）
   handleCommand(groupId, userId, userName, command) {
@@ -183,28 +186,68 @@ class GameManager {
     }
 
     return { success: true, data: game.getStatus() };
-  }
-
-  // 自動終了したゲームをクリーンアップ
+  }  // 自動終了したゲームをクリーンアップ
   cleanupAutoEndedGames() {
+    let cleanedCount = 0;
+    const now = new Date();
+    
     for (const [groupId, game] of this.games.entries()) {
-      if (game.autoEnded || game.status === 'ended') {
-        console.log(`Cleaning up auto-ended game: ${groupId}`);
-        game.clearAutoEndTimer();
+      // より厳密なクリーンアップ条件
+      const isAutoEnded = game.autoEnded === true;
+      const isStatusEnded = game.status === 'ended';
+      const isOldInactivity = game.lastActivity && (now - game.lastActivity) > (35 * 60 * 1000); // 35分以上前
+      
+      if (isAutoEnded || (isStatusEnded && isOldInactivity)) {
+        console.log(`🧹 Cleaning up auto-ended game: ${groupId} (autoEnded: ${isAutoEnded}, statusEnded: ${isStatusEnded}, oldInactivity: ${isOldInactivity})`);
+        
+        // タイマーをクリア
+        if (game.clearAutoEndTimer) {
+          game.clearAutoEndTimer();
+        }
+        
+        // プレイヤーマッピングのクリーンアップ
+        if (game.players) {
+          game.players.forEach(player => {
+            this.playerGroupMap.delete(player.userId);
+          });
+        }
+        
+        // ゲームインスタンス削除
         this.games.delete(groupId);
+        cleanedCount++;
       }
+    }
+    
+    if (cleanedCount > 0) {
+      console.log(`🧹 Cleaned up ${cleanedCount} auto-ended games`);
     }
   }
 
   // 定期的なクリーンアップを開始（オプション）
   startPeriodicCleanup() {
-    setInterval(() => {
+    // 既にタイマーが動いている場合は停止
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+    
+    // 5分ごとに自動終了ゲームをクリーンアップ
+    this.cleanupInterval = setInterval(() => {
       this.cleanupAutoEndedGames();
-    }, 5 * 60 * 1000); // 5分ごと
+    }, 5 * 60 * 1000); // 5分間隔
+    
+    console.log('Periodic cleanup started (5-minute intervals)');
   }
 
-  // 個人チャットでの夜行動コマンド処理
-  handlePrivateNightCommand(userId, userName, command, args = []) {
+  // 定期クリーンアップ停止
+  stopPeriodicCleanup() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+      console.log('Periodic cleanup stopped');
+    }
+  }
+  // 個人チャットでのゲームコマンド処理
+  async handlePrivateNightCommand(userId, userName, command, args = []) {
     // プレイヤーがゲームに参加しているグループを取得
     const groupId = this.playerGroupMap.get(userId);
     if (!groupId) {
@@ -222,29 +265,53 @@ class GameManager {
         success: false, 
         message: 'ゲームが見つかりません。グループチャットで@人狼を送ってゲームを開始してください。' 
       };
-    }
-
-    // 人狼ゲーム専用の夜行動コマンド
+    }    // 人狼ゲーム専用の夜行動コマンド
     if (game.gameType === 'werewolf') {
+      let result;
+      
       switch (command) {
+        case '#投票':
+          result = await game.handleVoteCommand(userId, args);
+          break;
         case '#襲撃':
-          return game.handleAttackCommand(userId, args);
+          result = await game.handleAttackCommand(userId, args);
+          break;
         case '#疑う':
         case '#憧憬':
-          return game.handleFocusCommand(userId, { action: command.substring(1), target: args[0] });
+          result = await game.handleFocusCommand(userId, { action: command.substring(1), target: args[0] });
+          break;
         case '#占い':
-          return game.handleDivineCommand(userId, command + ' ' + args.join(' '));
+          result = await game.handleDivineCommand(userId, command + ' ' + args.join(' '));
+          break;
         case '#護衛':
-          return game.handleGuardCommand(userId, command + ' ' + args.join(' '));
+          result = await game.handleGuardCommand(userId, command + ' ' + args.join(' '));
+          break;
         default:
           return { 
             success: false, 
-            message: `不明な夜行動コマンドです: ${command}\n使用可能: #襲撃 #占い #護衛 #疑う #憧憬` 
+            message: `不明なコマンドです: ${command}\n使用可能: #投票 #襲撃 #占い #護衛 #疑う #憧憬` 
           };
       }
+      // ゲームコマンド完了時の追加メッセージ処理
+      if (result.success && result.publicMessage) {
+        this.sendAdditionalMessage(groupId, result.publicMessage, 1500);
+      }
+      
+      // 占い結果など個人メッセージがある場合
+      if (result.success && result.privateMessages && result.privateMessages.length > 0) {
+        setTimeout(async () => {
+          try {
+            await this.messageSender.sendPrivateMessages(result.privateMessages);
+          } catch (error) {
+            console.error('Private messages send error:', error);
+          }
+        }, 500);
+      }
+      
+      return result;
     }
 
-    return { success: false, message: 'このゲームでは夜行動コマンドは使用できません。' };
+    return { success: false, message: 'このゲームではコマンドは使用できません。' };
   }
 
   // プレイヤーの参加グループ取得
@@ -255,6 +322,63 @@ class GameManager {
   // プレイヤーマッピングのクリーンアップ
   cleanupPlayerMapping(userId) {
     this.playerGroupMap.delete(userId);
+  }
+
+  // MessageSender設定
+  setMessageSender(messageSender) {
+    this.messageSender = messageSender;
+  }
+
+  // LINE Clientを設定
+  setLineClient(lineClient) {
+    this.lineClient = lineClient;
+    this.messageSender = new (require('./lineMessageSender'))(lineClient);
+  }
+
+  // コマンド結果に応じてメッセージを送信
+  async sendCommandResult(event, result) {
+    if (!this.messageSender) {
+      console.log('LineMessageSender not initialized');
+      return;
+    }
+    
+    try {
+      // 基本の応答メッセージ
+      await this.messageSender.sendCommandResult(event, result);
+      
+      // 追加の公開メッセージがある場合
+      if (result.publicMessage && result.groupId) {
+        setTimeout(async () => {
+          await this.messageSender.sendPublicMessage(result.groupId, result.publicMessage);
+        }, 500);
+      }
+    } catch (error) {
+      console.error('Error sending command result:', error);
+    }
+  }
+
+  // 追加メッセージ送信（夜更け通知など）
+  async sendAdditionalMessage(groupId, message, delay = 1000) {
+    if (this.messageSender) {
+      setTimeout(async () => {
+        try {
+          await this.messageSender.sendPublicMessage(groupId, message);
+        } catch (error) {
+          console.error('Additional message send error:', error);
+        }
+      }, delay);
+    }
+  }
+
+  // 個人メッセージ送信
+  async sendPrivateMessage(userId, message) {
+    if (this.messageSender) {
+      try {
+        await this.messageSender.sendPrivateMessages([{ userId, message }]);
+      } catch (error) {
+        console.error('Private message send error:', error);
+      }
+    }
   }
 }
 

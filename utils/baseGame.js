@@ -23,10 +23,9 @@ class BaseGame {  constructor(groupId) {
 
     if (this.players.length >= this.maxPlayers) {
       return { success: false, message: `参加人数が上限（${this.maxPlayers}人）に達しています。` };
-    }
-
-    this.players.push({
+    }    this.players.push({
       userId,
+      id: userId, // idプロパティを追加
       userName: userName || `プレイヤー${this.players.length + 1}`,
       joinedAt: new Date()
     });

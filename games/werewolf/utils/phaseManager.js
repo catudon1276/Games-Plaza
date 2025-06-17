@@ -4,6 +4,7 @@ class PhaseManager {
     this.phases = {
       WAITING: 'waiting',           // 待機中（参加者募集）
       DAY: 'day',                  // 昼フェーズ（議論・投票）
+      VOTE: 'vote',                // 投票フェーズ（個人チャット投票）
       NIGHT_WAITING: 'night_waiting',     // 夜フェーズ（行動選択待ち）
       NIGHT_RESOLVING: 'night_resolving', // 深夜フェーズ（行動処理）
       ENDED: 'ended'               // ゲーム終了
@@ -12,6 +13,35 @@ class PhaseManager {
     this.currentPhase = this.phases.WAITING;
     this.dayCount = 0;
     this.phaseStartTime = new Date();
+    this.phaseTimer = null;
+    
+    // タイマー設定（分）
+    this.phaseTimeLimits = {
+      DAY: 5,    // 会議時間: 5分
+      VOTE: 3    // 投票時間: 3分
+    };
+  }
+
+  // フェーズタイマー開始
+  startPhaseTimer(phase, callback) {
+    this.clearPhaseTimer();
+    
+    const timeLimit = this.phaseTimeLimits[phase];
+    if (timeLimit) {
+      console.log(`⏰ Starting ${phase} phase timer: ${timeLimit} minutes`);
+      this.phaseTimer = setTimeout(() => {
+        console.log(`⏰ ${phase} phase time limit reached`);
+        callback();
+      }, timeLimit * 60 * 1000);
+    }
+  }
+
+  // フェーズタイマークリア
+  clearPhaseTimer() {
+    if (this.phaseTimer) {
+      clearTimeout(this.phaseTimer);
+      this.phaseTimer = null;
+    }
   }
 
   // フェーズ切り替え
@@ -22,6 +52,29 @@ class PhaseManager {
     
     if (newPhase === this.phases.DAY) {
       this.dayCount++;
+    }
+    
+    return {
+      oldPhase,
+      newPhase,
+      dayCount: this.dayCount,
+      message: this.getPhaseMessage(newPhase)
+    };
+  }
+
+  // フェーズ切り替え（タイマー付き）
+  switchToPhaseWithTimer(newPhase, timerCallback) {
+    const oldPhase = this.currentPhase;
+    this.currentPhase = newPhase;
+    this.phaseStartTime = new Date();
+    
+    if (newPhase === this.phases.DAY) {
+      this.dayCount++;
+    }
+    
+    // 自動タイマー開始
+    if (timerCallback) {
+      this.startPhaseTimer(newPhase, timerCallback);
     }
     
     return {
@@ -45,11 +98,25 @@ class PhaseManager {
       phase: result.newPhase,
       dayCount: result.dayCount
     };
-  }
-  // 昼 → 夜（行動選択）
-  switchToNightWaiting() {
+  }  // 昼 → 投票フェーズ
+  switchToVoting() {
     if (this.currentPhase !== this.phases.DAY) {
       return { success: false, message: '昼フェーズではありません。' };
+    }
+    
+    const result = this.switchToPhase(this.phases.VOTE);
+    return { 
+      success: true, 
+      message: result.message,
+      phase: result.newPhase,
+      dayCount: result.dayCount
+    };
+  }
+
+  // 投票 → 夜（行動選択）
+  switchToNightWaiting() {
+    if (this.currentPhase !== this.phases.VOTE) {
+      return { success: false, message: '投票フェーズではありません。' };
     }
     
     const result = this.switchToPhase(this.phases.NIGHT_WAITING);
@@ -106,6 +173,8 @@ class PhaseManager {
         return '参加者を募集中です。';
       case this.phases.DAY:
         return `🌅 ${this.dayCount}日目の朝になりました。\n議論を開始してください。`;
+      case this.phases.VOTE:
+        return `🗳️ ${this.dayCount}日目の投票フェーズです。\n各プレイヤーは投票を行ってください。`;
       case this.phases.NIGHT_WAITING:
         return `🌙 ${this.dayCount}日目の夜になりました。\n各プレイヤーは行動を選択してください。`;
       case this.phases.NIGHT_RESOLVING:
@@ -125,14 +194,14 @@ class PhaseManager {
       startTime: this.phaseStartTime,
       message: this.getPhaseMessage(this.currentPhase)
     };
-  }
-  // フェーズチェック
+  }  // フェーズチェック
   isWaiting() { return this.currentPhase === this.phases.WAITING; }
   isDay() { return this.currentPhase === this.phases.DAY; }
+  isVote() { return this.currentPhase === this.phases.VOTE; }
   isNightWaiting() { return this.currentPhase === this.phases.NIGHT_WAITING; }
   isNightResolving() { return this.currentPhase === this.phases.NIGHT_RESOLVING; }
   isEnded() { return this.currentPhase === this.phases.ENDED; }
-  isPlaying() { return this.isDay() || this.isNightWaiting() || this.isNightResolving(); }
+  isPlaying() { return this.isDay() || this.isVote() || this.isNightWaiting() || this.isNightResolving(); }
   isNight() { return this.isNightWaiting() || this.isNightResolving(); }
 }
 

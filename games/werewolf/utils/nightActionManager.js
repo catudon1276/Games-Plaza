@@ -114,12 +114,14 @@ class NightActionManager {
       return validationResult;
     }
 
-    // 行動を保存
-    this.pendingActions.set(userId, {
-      type: actionType,
-      target: targetId,
-      timestamp: new Date()
-    });    const targetName = targetId ? this.game.getPlayer(targetId)?.userName : 'なし';
+  // 行動を保存
+  this.pendingActions.set(userId, {
+    type: actionType,
+    target: targetId,
+    timestamp: new Date()
+  });
+
+  const targetName = targetId ? this.game.getPlayer(targetId)?.nickname || this.game.getPlayer(targetId)?.displayName || 'なし' : 'なし';
     
     // 全員の行動が揃ったかチェック
     if (this.areAllActionsSubmitted()) {
@@ -266,31 +268,46 @@ class NightActionManager {
       executions: [],
       privateMessages: [],
       publicMessage: ''
-    };
-
-    // 霊媒師の自動実行（昨日の処刑者を霊視）
+    };    // 霊媒師の自動実行（昨日の処刑者を霊視）
     const mediumPlayers = this.game.players.filter(p => p.isAlive && p.role === 'medium');
     for (const mediumPlayer of mediumPlayers) {
+      const executedPlayers = this.game.lastExecuted || [];
+      console.log(`[DEBUG] Medium processing: ${executedPlayers.length} executed players`);
+      
       const mediumResult = this.abilityManager.executeAbility(
         'medium',
         mediumPlayer,
         null, // ターゲットは不要（処刑者全員を自動で対象）
         { 
           game: this.game, 
-          executedPlayers: this.game.lastExecuted || [] // 昨日の処刑者リスト
+          executedPlayers: executedPlayers
         }
       );
 
-      if (mediumResult.success && mediumResult.result) {
-        results.executions.push({
-          ability: 'medium',
-          actor: mediumPlayer,
-          target: null,
-          result: mediumResult.result
-        });
+      console.log(`[DEBUG] Medium result:`, mediumResult);      if (mediumResult.success) {
+        if (mediumResult.result) {
+          results.executions.push({
+            ability: 'medium',
+            actor: mediumPlayer,
+            target: null,
+            result: mediumResult.result
+          });
+        }        // 霊媒結果の個人メッセージを generateNightLog で生成
+        const mediumAbility = this.abilityManager.getAbility('medium');
+        if (mediumAbility && mediumAbility.generateNightLog && mediumResult.result) {
+          const nightLogMessage = mediumAbility.generateNightLog(mediumPlayer, mediumResult.result);
+          if (nightLogMessage) {
+            console.log(`[DEBUG] Adding medium night log: ${nightLogMessage}`);
+            results.privateMessages.push({
+              userId: mediumPlayer.userId,
+              message: nightLogMessage
+            });
+          }
+        }
 
-        // 霊媒結果は個別メッセージで送信
+        // 古い privateMessage も併用（互換性のため）
         if (mediumResult.privateMessage) {
+          console.log(`[DEBUG] Adding medium private message: ${mediumResult.privateMessage}`);
           results.privateMessages.push({
             userId: mediumPlayer.userId,
             message: mediumResult.privateMessage
@@ -299,23 +316,46 @@ class NightActionManager {
       }
     }
 
-    // 全ての行動を能力別に実行
+    // 襲撃行動を先に統合処理
+    const attackResult = this.resolveAttackActions();
+    if (attackResult) {
+      results.executions.push(attackResult);
+    }
+
+    // 襲撃以外の全ての行動を能力別に実行
     for (const [userId, action] of this.pendingActions.entries()) {
       const player = this.game.getPlayer(userId);
       if (!player || !player.isAlive) continue;
 
-      if (['skip', 'sleep', 'wait'].includes(action.type)) {
-        continue; // 何もしない行動
-      }
-
-      // 能力実行
+      if (['skip', 'sleep', 'wait', 'attack'].includes(action.type)) {
+        // 襲撃は既に処理済み、その他のアクションログを生成
+        if (action.type === 'attack') {
+          continue; // 襲撃結果は後で処理
+        }
+        
+        // focus行動（注目行動）のログ生成
+        if (action.type === 'focus') {
+          const focusMessage = this.generateFocusActionLog(player, action);
+          if (focusMessage) {
+            results.privateMessages.push({
+              userId: userId,
+              message: focusMessage
+            });
+          }
+        }
+        continue;
+      }      // 能力実行
       const target = action.target ? this.game.getPlayer(action.target) : null;
+      console.log(`[DEBUG] Executing ability: ${action.type} by ${player.nickname} targeting ${target?.nickname || 'none'}`);
+      
       const result = this.abilityManager.executeAbility(
         action.type,
         player,
         target,
         { game: this.game, nightActions: this.pendingActions }
       );
+
+      console.log(`[DEBUG] Ability result:`, result);
 
       if (result.success && result.result) {
         results.executions.push({
@@ -335,6 +375,12 @@ class NightActionManager {
       }
     }
 
+    // 人狼の襲撃結果を個別メッセージで送信
+    this.addWerewolfAttackMessages(results, attackResult);
+
+    // 全ての行動ログを生成
+    this.addAllActionLogs(results);
+
     // 公開メッセージ構築
     results.publicMessage = this.buildPublicNightMessage(results.executions);
 
@@ -344,6 +390,206 @@ class NightActionManager {
     return results;
   }
 
+  // 襲撃行動の統合処理（複数人狼の競合処理）
+  resolveAttackActions() {
+    const attackActions = [];
+    
+    // 襲撃行動を収集
+    for (const [userId, action] of this.pendingActions.entries()) {
+      if (action.type === 'attack' && action.target) {
+        const player = this.game.getPlayer(userId);
+        if (player && player.isAlive && player.role === 'werewolf') {
+          attackActions.push({
+            actor: player,
+            targetId: action.target,
+            target: this.game.getPlayer(action.target)
+          });
+        }
+      }
+    }
+
+    if (attackActions.length === 0) {
+      return null; // 襲撃なし
+    }
+
+    if (attackActions.length === 1) {
+      // 単一襲撃：通常処理
+      const attack = attackActions[0];
+      const result = this.abilityManager.executeAbility(
+        'attack',
+        attack.actor,
+        attack.target,
+        { game: this.game, nightActions: this.pendingActions }
+      );
+
+      if (result.success && result.result) {
+        return {
+          ability: 'attack',
+          actor: attack.actor,
+          target: attack.target,
+          result: result.result,
+          attackType: 'single'
+        };
+      }
+    } else {
+      // 複数襲撃：競合処理
+      return this.resolveMultipleAttacks(attackActions);
+    }
+
+    return null;
+  }
+
+  // 複数人狼の襲撃競合処理
+  resolveMultipleAttacks(attackActions) {
+    // ターゲットをグループ化
+    const targetGroups = {};
+    for (const attack of attackActions) {
+      const targetId = attack.targetId;
+      if (!targetGroups[targetId]) {
+        targetGroups[targetId] = [];
+      }
+      targetGroups[targetId].push(attack);
+    }
+
+    const uniqueTargets = Object.keys(targetGroups);
+
+    if (uniqueTargets.length === 1) {
+      // 全員が同じ相手を襲撃：通常処理
+      const targetId = uniqueTargets[0];
+      const attack = targetGroups[targetId][0]; // 代表者で実行
+
+      const result = this.abilityManager.executeAbility(
+        'attack',
+        attack.actor,
+        attack.target,
+        { game: this.game, nightActions: this.pendingActions }
+      );
+
+      if (result.success && result.result) {
+        return {
+          ability: 'attack',
+          actor: attack.actor,
+          target: attack.target,
+          result: result.result,
+          attackType: 'unified',
+          actorCount: targetGroups[targetId].length
+        };
+      }
+    } else {
+      // 異なる相手を襲撃：ランダム選択
+      const randomIndex = Math.floor(Math.random() * uniqueTargets.length);
+      const selectedTargetId = uniqueTargets[randomIndex];
+      const selectedAttack = targetGroups[selectedTargetId][0];
+
+      console.log(`🎲 Multiple werewolf targets detected. Randomly selected: ${selectedAttack.target.nickname}`);
+
+      const result = this.abilityManager.executeAbility(
+        'attack',
+        selectedAttack.actor,
+        selectedAttack.target,
+        { game: this.game, nightActions: this.pendingActions }
+      );
+
+      if (result.success && result.result) {
+        return {
+          ability: 'attack',
+          actor: selectedAttack.actor,
+          target: selectedAttack.target,
+          result: result.result,
+          attackType: 'random',
+          totalTargets: uniqueTargets.length,
+          allTargets: uniqueTargets.map(id => this.game.getPlayer(id).nickname)
+        };      }
+    }    return null;
+  }
+  // 人狼の襲撃結果を個別メッセージで送信（アビリティベース）
+  addWerewolfAttackMessages(results, attackResult) {
+    if (!attackResult) return;
+
+    // 襲撃に参加した全ての人狼に結果を送信
+    const werewolves = this.game.players.filter(p => p.isAlive && p.role === 'werewolf');
+    const attackAbility = this.abilityManager.getAbility('attack');
+    
+    for (const werewolf of werewolves) {
+      const message = attackAbility.generateNightLog(
+        werewolf, 
+        attackResult,
+        attackResult.attackType,
+        {
+          actorCount: attackResult.actorCount,
+          allTargets: attackResult.allTargets
+        }
+      );
+
+      if (message) {
+        results.privateMessages.push({
+          userId: werewolf.userId,
+          message: message
+        });
+      }
+    }
+  }  // 全ての行動ログを生成（アビリティベース）
+  addAllActionLogs(results) {
+    // 実行された各アビリティの詳細ログを生成（focus以外）
+    for (const execution of results.executions) {
+      const ability = this.abilityManager.getAbility(execution.ability);
+      if (!ability || !ability.generateNightLog) continue;
+
+      let message = null;
+
+      // 各アビリティの種類に応じたログ生成
+      switch (execution.ability) {
+        case 'divine':
+          message = ability.generateNightLog(execution.actor, execution.result);
+          break;
+        case 'medium':
+          message = ability.generateNightLog(execution.actor, execution.result);
+          break;        case 'guard':
+          // 護衛の場合は襲撃結果も考慮
+          const attackResults = results.executions.filter(e => e.ability === 'attack');
+          message = ability.generateNightLog(
+            execution.actor, 
+            execution.result, 
+            attackResults
+          );
+          break;
+        case 'attack':
+          // 襲撃ログは別途 addWerewolfAttackMessages で処理
+          continue;
+        case 'focus':
+          // focus行動は下記の個別処理で対応
+          continue;
+      }
+
+      if (message) {
+        results.privateMessages.push({
+          userId: execution.actor.userId,
+          message: message
+        });
+      }
+    }
+
+    // 個別のfocus行動のログ生成（pendingActionsから）
+    for (const [userId, action] of this.pendingActions.entries()) {
+      const player = this.game.getPlayer(userId);
+      if (!player || !player.isAlive) continue;
+
+      if (action.type === 'focus') {
+        const focusAbility = this.abilityManager.getAbility('focus');
+        const focusMessage = focusAbility.generateNightLog(player, {
+          target: this.game.getPlayer(action.target),
+          result: 'completed'
+        });
+
+        if (focusMessage) {
+          results.privateMessages.push({
+            userId: userId,
+            message: focusMessage
+          });
+        }
+      }
+    }
+  }
   // 公開夜結果メッセージ構築
   buildPublicNightMessage(executions) {
     let message = '🌌 深夜の出来事:\n\n';

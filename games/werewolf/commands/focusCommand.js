@@ -42,22 +42,24 @@ class FocusCommand {
         success: false, 
         message: 'この行動は実行できません。' 
       };
+    }    // 引数チェック
+    let targetName = '';
+    if (typeof args === 'string') {
+      targetName = args.replace('@', '').trim();
+    } else if (Array.isArray(args) && args.length > 0) {
+      targetName = args.join(' ').replace('@', '').trim();
+    } else if (args && typeof args === 'object') {
+      // テスト用のオブジェクト形式
+      if (args.target) {
+        targetName = args.target;
+      }
     }
 
-    // 引数チェック
-    if (!args || args.length === 0) {
+    if (!targetName) {
       const actionName = playerTeam === 'village' ? '疑う' : '憧憬';
       return { 
         success: false, 
         message: `対象を指定してください。形式: #${actionName} @プレイヤー名` 
-      };
-    }
-
-    const targetName = args.join(' ').replace('@', '').trim();
-    if (!targetName) {
-      return { 
-        success: false, 
-        message: '対象のプレイヤー名を正しく指定してください。' 
       };
     }
 

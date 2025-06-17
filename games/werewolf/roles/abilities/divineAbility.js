@@ -69,6 +69,18 @@ class DivineAbility {
       }))
     };
   }
+
+  // 深夜処理後の個人ログ生成（占い結果詳細）
+  generateNightLog(actor, divineResult) {
+    if (!divineResult || !divineResult.target) return null;
+
+    const target = divineResult.target;
+    const result = divineResult.result;
+    const resultText = result === 'white' ? '白（村人陣営）' : '黒（人狼陣営）';
+    const resultEmoji = result === 'white' ? '😇' : '😈';
+
+    return `🔮 占い結果: ${target.nickname}は「${resultText}」です。 ${resultEmoji}`;
+  }
 }
 
 module.exports = DivineAbility;

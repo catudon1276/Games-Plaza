@@ -34,9 +34,7 @@ class FocusAbility {
 
     // 役職に応じたメッセージを生成
     const actionName = this.getActionName(actor.role);
-    const actionEmoji = this.getActionEmoji(actor.role);
-
-    return {
+    const actionEmoji = this.getActionEmoji(actor.role);    return {
       success: true,
       result: {
         targetId: target.id,
@@ -44,8 +42,7 @@ class FocusAbility {
         actionType: actionName,
         noEffect: true
       },
-      message: `${target.nickname}を${actionName}しました。`,
-      privateMessage: `${actionEmoji} ${target.nickname}を${actionName}しました。（この行動に効果はありません）`
+      message: `${target.nickname}を${actionName}しました。`
     };
   }
 
@@ -112,6 +109,17 @@ class FocusAbility {
 
     const randomIndex = Math.floor(Math.random() * validTargets.length);
     return validTargets[randomIndex];
+  }
+
+  // 深夜処理後の個人ログ生成（注目行動詳細）
+  generateNightLog(actor, focusResult) {
+    if (!focusResult || !focusResult.target) return null;
+
+    const target = focusResult.target;
+    const actionName = this.getActionName(actor.role);
+    const actionEmoji = this.getActionEmoji(actor.role);
+
+    return `${actionEmoji} あなたは${target.nickname}を${actionName}ました`;
   }
 
   // 公開メッセージなし（隠密行動）

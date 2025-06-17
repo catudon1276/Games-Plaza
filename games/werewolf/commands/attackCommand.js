@@ -54,22 +54,23 @@ class AttackCommand {
         success: false, 
         message: '襲撃対象のプレイヤー名を正しく指定してください。' 
       };
-    }
-
-    // 襲撃対象プレイヤーを検索
+    }    // 襲撃対象プレイヤーを検索
     const targetPlayer = this.game.players.find(p => 
       p.nickname === targetName && p.isAlive
     );
+
+    console.log(`[DEBUG] Attacking player: userId=${userId}`);
+    console.log(`[DEBUG] Target name: ${targetName}`);
+    console.log(`[DEBUG] Found target: ${targetPlayer ? `ID=${targetPlayer.id}, userId=${targetPlayer.userId}, nickname=${targetPlayer.nickname}` : 'NOT_FOUND'}`);
 
     if (!targetPlayer) {
       return { 
         success: false, 
         message: `プレイヤー「${targetName}」が見つからないか、既に死亡しています。` 
       };
-    }
-
-    // 自己襲撃チェック
-    if (targetPlayer.id === userId) {
+    }    // 自己襲撃チェック
+    if (targetPlayer.userId === userId) {
+      console.log(`[DEBUG] Self-attack check: targetPlayer.userId=${targetPlayer.userId}, userId=${userId}`);
       return { 
         success: false, 
         message: '自分自身を襲撃することはできません。' 
@@ -82,13 +83,8 @@ class AttackCommand {
         success: false, 
         message: '仲間の人狼を襲撃することはできません。' 
       };
-    }
-
-    // 襲撃行動を設定
-    const result = this.nightActionManager.setAction(userId, 'attack', {
-      targetId: targetPlayer.id,
-      targetName: targetPlayer.nickname
-    });
+    }    // 襲撃行動を設定
+    const result = this.nightActionManager.submitAction(userId, 'attack', targetPlayer.userId);
       if (result.success) {
       this.game.updateActivity();
       

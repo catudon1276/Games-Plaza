@@ -1,6 +1,7 @@
 const express = require('express');
 const { Client, middleware } = require('@line/bot-sdk');
 const GameManager = require('./utils/gameManager');
+const LineMessageSender = require('./utils/lineMessageSender');
 require('dotenv').config();
 
 const app = express();
@@ -15,6 +16,7 @@ const config = {
 // LINE Clientの初期化（環境変数チェック付き）
 let client = null;
 let lineEnabled = false;
+let messageSender = null;
 
 try {
   if (process.env.CHANNEL_ACCESS_TOKEN && process.env.CHANNEL_SECRET) {
@@ -22,6 +24,7 @@ try {
       channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
       channelSecret: process.env.CHANNEL_SECRET,
     });
+    messageSender = new LineMessageSender(client);
     lineEnabled = true;
     console.log('LINE BOT enabled');
   } else {
@@ -35,8 +38,13 @@ try {
 
 const gameManager = new GameManager();
 
-// 定期的なゲームクリーンアップを開始（今後実装予定）
-// gameManager.startPeriodicCleanup();
+// LINE Clientが有効な場合はGameManagerに設定
+if (lineEnabled && client) {
+  gameManager.setLineClient(client);
+}
+
+// 定期的なゲームクリーンアップを開始
+gameManager.startPeriodicCleanup();
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -97,12 +105,12 @@ async function handleEvent(event) {
     }
   } catch (error) {
     console.log('Could not get user profile:', error.message);
-  }
-  // @または#から始まるコマンドのみ処理
+  }  // @または#から始まるコマンドのみ処理
   if (!userMessage.startsWith('@') && !userMessage.startsWith('#')) {
     return null; // 何も返さない
   }
-  let replyMessage = '';
+
+  let result;
   const isPrivateChat = event.source.type === 'user';
   
   try {
@@ -110,11 +118,10 @@ async function handleEvent(event) {
     if (userMessage.startsWith('@')) {
       if (isPrivateChat) {
         // 個人チャットでは@コマンドは受け付けない
-        replyMessage = '@コマンドはグループチャットで送信してください。';
+        result = { success: false, message: '@コマンドはグループチャットで送信してください。' };
       } else {
         // グループチャットでの@コマンド処理
-        const result = gameManager.handleCommand(groupId, userId, userName, userMessage);
-        replyMessage = result.message;
+        result = gameManager.handleCommand(groupId, userId, userName, userMessage);
       }
     }
     // #コマンドの処理
@@ -126,23 +133,26 @@ async function handleEvent(event) {
       
       if (isPrivateChat) {
         // 個人チャットでの夜行動コマンド処理
-        const result = await gameManager.handlePrivateNightCommand(userId, userName, command, args);
-        replyMessage = result.message;
+        result = await gameManager.handlePrivateNightCommand(userId, userName, command, args);
       } else {
         // グループチャットでの#コマンド処理
-        const result = await gameManager.handleHashCommand(groupId, userId, userName, command, args);
-        replyMessage = result.message;
-      }
-    }
+        result = await gameManager.handleHashCommand(groupId, userId, userName, command, args);
+      }    }
   } catch (error) {
     console.error('Command processing error:', error);
-    replyMessage = 'エラーが発生しました。もう一度お試しください。';
+    result = { success: false, message: 'エラーが発生しました。もう一度お試しください。' };
   }
 
-  return client.replyMessage(event.replyToken, {
-    type: 'text',
-    text: replyMessage
-  });
+  // GameManagerのsendCommandResultを使用して結果を送信
+  if (gameManager.messageSender && result) {
+    return await gameManager.sendCommandResult(event, result);
+  } else {
+    // Fallback: 従来の単一メッセージ送信
+    return client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: result?.message || 'エラーが発生しました。'
+    });
+  }
 }
 
 // Error handling middleware

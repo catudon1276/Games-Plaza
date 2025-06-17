@@ -51,6 +51,24 @@ class MediumAbility {
       message: '霊媒師は自動で全ての処刑者を霊視します。行動選択は不要です。'
     };
   }
+
+  // 深夜処理後の個人ログ生成（霊媒結果詳細）
+  generateNightLog(actor, mediumResult) {
+    if (!mediumResult || !mediumResult.targets || mediumResult.targets.length === 0) {
+      return '👻 昨日は処刑がありませんでした。霊視する対象がいません。';
+    }
+
+    const results = mediumResult.results || [];
+    let message = '👻 霊媒結果:\n';
+
+    for (const result of results) {
+      const resultText = result.result === 'white' ? '白（村人陣営）' : '黒（人狼陣営）';
+      const resultEmoji = result.result === 'white' ? '😇' : '😈';
+      message += `・${result.player.nickname}: 「${resultText}」 ${resultEmoji}\n`;
+    }
+
+    return message.trim();
+  }
 }
 
 module.exports = MediumAbility;

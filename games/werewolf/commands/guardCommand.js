@@ -1,5 +1,3 @@
-const { AbilityManager } = require('../roles/abilities/abilityManager');
-
 /**
  * 騎士（狩人）の夜行動コマンド - 対象を守る
  * @param {object} game - WerewolfGameインスタンス
@@ -7,10 +5,18 @@ const { AbilityManager } = require('../roles/abilities/abilityManager');
  * @param {string} text - コマンドテキスト
  * @returns {Promise<{message: string, isPrivate: boolean}>}
  */
-async function guardCommand(game, userId, text) {
+async function guardCommand(game, userId, args) {
     try {
+        // 引数の処理
+        let text = '';
+        if (Array.isArray(args)) {
+            text = args.join(' ');
+        } else if (typeof args === 'string') {
+            text = args;
+        }
+
         // 現在のフェーズチェック
-        if (game.phase !== 'night') {
+        if (!game.phaseManager.isNightWaiting()) {
             return {
                 message: '護衛は夜の間のみ行えます。',
                 isPrivate: true
@@ -48,14 +54,12 @@ async function guardCommand(game, userId, text) {
             return {
                 message: '護衛対象を指定してください。例: #護衛 太郎',
                 isPrivate: true
-            };
-        }
-
-        // ターゲット検索
+            };        }        // ターゲット検索
         const target = game.players.find(p => 
-            p.displayName === targetText || 
+            p.nickname === targetText || 
             p.userId === targetText ||
-            p.displayName.includes(targetText)
+            (p.nickname && p.nickname.includes && p.nickname.includes(targetText)) ||
+            (p.displayName && p.displayName.includes && p.displayName.includes(targetText))
         );
 
         if (!target) {
@@ -79,20 +83,20 @@ async function guardCommand(game, userId, text) {
                 message: '自分自身は護衛できません。',
                 isPrivate: true
             };
+        }        // abilityManagerを使用して行動を登録
+        const result = game.nightActionManager.submitAction(player.userId, 'guard', target.userId);
+
+        if (result.success) {
+            return {
+                message: result.message,
+                isPrivate: true
+            };
+        } else {
+            return {
+                message: result.message,
+                isPrivate: true
+            };
         }
-
-        // AbilityManagerを使用して行動を登録
-        const result = await AbilityManager.executeAbility(
-            'guard',
-            game,
-            player,
-            target
-        );
-
-        return {
-            message: result.message,
-            isPrivate: true
-        };
 
     } catch (error) {
         console.error('Guard command error:', error);
