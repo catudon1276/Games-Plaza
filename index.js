@@ -35,8 +35,8 @@ try {
 
 const gameManager = new GameManager();
 
-// 定期的なゲームクリーンアップを開始
-gameManager.startPeriodicCleanup();
+// 定期的なゲームクリーンアップを開始（今後実装予定）
+// gameManager.startPeriodicCleanup();
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -102,37 +102,41 @@ async function handleEvent(event) {
   if (!userMessage.startsWith('@') && !userMessage.startsWith('#')) {
     return null; // 何も返さない
   }
-
   let replyMessage = '';
   const isPrivateChat = event.source.type === 'user';
   
-  // @コマンドの処理
-  if (userMessage.startsWith('@')) {
-    if (isPrivateChat) {
-      // 個人チャットでは@コマンドは受け付けない
-      replyMessage = '@コマンドはグループチャットで送信してください。';
-    } else {
-      // グループチャットでの@コマンド処理
-      const result = gameManager.handleCommand(groupId, userId, userName, userMessage);
-      replyMessage = result.message;
+  try {
+    // @コマンドの処理
+    if (userMessage.startsWith('@')) {
+      if (isPrivateChat) {
+        // 個人チャットでは@コマンドは受け付けない
+        replyMessage = '@コマンドはグループチャットで送信してください。';
+      } else {
+        // グループチャットでの@コマンド処理
+        const result = gameManager.handleCommand(groupId, userId, userName, userMessage);
+        replyMessage = result.message;
+      }
     }
-  }
-  // #コマンドの処理
-  else if (userMessage.startsWith('#')) {
-    // コマンドと引数を分離
-    const parts = userMessage.split(' ');
-    const command = parts[0];
-    const args = parts.slice(1);
-    
-    if (isPrivateChat) {
-      // 個人チャットでの夜行動コマンド処理
-      const result = gameManager.handlePrivateNightCommand(userId, userName, command, args);
-      replyMessage = result.message;
-    } else {
-      // グループチャットでの#コマンド処理
-      const result = gameManager.handleHashCommand(groupId, userId, userName, command, args);
-      replyMessage = result.message;
+    // #コマンドの処理
+    else if (userMessage.startsWith('#')) {
+      // コマンドと引数を分離
+      const parts = userMessage.split(' ');
+      const command = parts[0];
+      const args = parts.slice(1);
+      
+      if (isPrivateChat) {
+        // 個人チャットでの夜行動コマンド処理
+        const result = await gameManager.handlePrivateNightCommand(userId, userName, command, args);
+        replyMessage = result.message;
+      } else {
+        // グループチャットでの#コマンド処理
+        const result = await gameManager.handleHashCommand(groupId, userId, userName, command, args);
+        replyMessage = result.message;
+      }
     }
+  } catch (error) {
+    console.error('Command processing error:', error);
+    replyMessage = 'エラーが発生しました。もう一度お試しください。';
   }
 
   return client.replyMessage(event.replyToken, {
